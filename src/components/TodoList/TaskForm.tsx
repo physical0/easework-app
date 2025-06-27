@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Task } from '../../hooks/useTasks';
 
 type TaskFormProps = {
-  onSubmit: (task: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => Promise<void>;
+  onSubmit: (task: Partial<Task>) => Promise<void>;
   initialData?: Partial<Task>;
   isEditing?: boolean;
 };

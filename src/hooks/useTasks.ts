@@ -5,6 +5,7 @@ import { useAuth } from '../contexts';
 // Define the Task type to be used throughout the app
 export type Task = {
   id: string;
+  user_id: string;
   title: string;
   description: string | null;
   due_date: string | null;
@@ -54,25 +55,38 @@ export function useTasks() {
     fetchTasks();
   }, [user, fetchTasks]);
 
-  const addTask = async (newTask: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => {
+  const addTask = async (newTask: Partial<Task>) => {
+    if (!user) {
+      setError('User not authenticated');
+      return null;
+    }
     try {
       setError(null);
 
+      console.log('Adding task:', newTask);
+
+    const taskWithUserId = {
+      ...newTask,
+      user_id: user.id,
+      priority: !newTask.priority ? 'low' : newTask.priority,
+    };
       const { data, error } = await supabase
         .from('tasks')
-        .insert([{ ...newTask, user_id: user?.id }])
-        .select();
+        .insert([taskWithUserId])  
+        .select()
+        .single();
 
       if (error) throw error;
 
-      setTasks(prev => [data[0] as Task, ...prev]);
-      return data[0] as Task;
+      setTasks(prev => [data, ...prev]);
+      return data;
     } catch (error) {
       console.error('Error adding task:', error instanceof Error ? error.message : 'Unknown error');
       setError(error instanceof Error ? error.message : 'An error occurred while adding task');
       return null;
     }
   };
+
 
   const updateTask = async (id: string, updates: Partial<Task>) => {
     try {

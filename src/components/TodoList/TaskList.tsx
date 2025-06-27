@@ -3,7 +3,7 @@ import type { Task } from '../../hooks/useTasks';
 import TaskForm from './TaskForm';
 
 type TaskListProps = {
-  tasks: Task[];
+  tasks: Task[]; // Fix: Change from Task to Task[]
   onUpdateTask: (id: string, updates: Partial<Task>) => Promise<Task | null>;
   onDeleteTask: (id: string) => Promise<boolean>;
 };
@@ -11,7 +11,7 @@ type TaskListProps = {
 export default function TaskList({ tasks, onUpdateTask, onDeleteTask }: TaskListProps) {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
-  const handleUpdateTask = async (task: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => {
+  const handleUpdateTask = async (task: Partial<Task>) => {
     if (!editingTaskId) return;
     await onUpdateTask(editingTaskId, task);
     setEditingTaskId(null);

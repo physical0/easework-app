@@ -11,7 +11,7 @@ export default function TodoPage() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed'>('all');
 
   const handleAddTask = async (newTask: Partial<Task>) => {
-    await addTask(newTask as Task);
+    await addTask(newTask as Partial<Task>);
   };
 
   const filteredTasks = tasks.filter(task => {

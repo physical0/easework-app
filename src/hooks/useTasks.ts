@@ -89,20 +89,31 @@ export function useTasks() {
 
 
   const updateTask = async (id: string, updates: Partial<Task>) => {
+    if (!user) {
+      setError('User not authenticated');
+      return null;
+    }
+
     try {
       setError(null);
 
+      const validUpdates = {
+        ...updates,
+        priority: updates.priority ? updates.priority : 'low',
+      }
+
       const { data, error } = await supabase
         .from('tasks')
-        .update({ ...updates, updated_at: new Date().toISOString() })
+        .update({ ...validUpdates, updated_at: new Date().toISOString() })
         .eq('id', id)
-        .eq('user_id', user?.id)
-        .select();
+        .eq('user_id', user.id)
+        .select()
+        .single(); 
 
       if (error) throw error;
 
-      setTasks(prev => prev.map(task => (task.id === id ? { ...task, ...data[0] } : task)));
-      return data[0] as Task;
+      setTasks(prev => prev.map(task => (task.id === id ? { ...task, ...data } : task)));
+      return data as Task;
     } catch (error) {
       console.error('Error updating task:', error instanceof Error ? error.message : 'Unknown error');
       setError(error instanceof Error ? error.message : 'An error occurred while updating task');

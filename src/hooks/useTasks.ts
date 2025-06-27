@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../supabase/supabase';
 import { useAuth } from '../contexts';
 
 // Define the Task type to be used throughout the app

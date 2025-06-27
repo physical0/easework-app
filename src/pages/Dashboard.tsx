@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../contexts/useAuth';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../supabase/supabase';
 
 type DashboardStats = {
   taskCount: number;

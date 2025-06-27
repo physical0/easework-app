@@ -1,32 +1,24 @@
 import { useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/useAuth';
 
 export default function Auth() {
-  const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
+  const { signUp, signIn, authLoading } = useAuth();
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) alert(error.message);
-    else alert('Check your email for the confirmation link!');
-    setLoading(false);
+    const result = await signUp(email, password, username);
+    alert(result.message);
   };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) alert(error.message);
-    setLoading(false);
+    const result = await signIn(email, password);
+    if (!result.success) {
+      alert(result.message);
+    }
   };
 
   return (
@@ -41,6 +33,13 @@ export default function Auth() {
           onChange={(e) => setEmail(e.target.value)}
         />
         <input
+          className="w-full p-2 border rounded mb-2"
+          type="text"
+          placeholder="Your username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
+        <input
           className="w-full p-2 border rounded mb-4"
           type="password"
           placeholder="Your password"
@@ -52,16 +51,16 @@ export default function Auth() {
         <button
           onClick={handleSignIn}
           className="w-full p-2 bg-blue-500 text-white rounded"
-          disabled={loading}
+          disabled={authLoading}
         >
-          {loading ? 'Loading...' : 'Sign In'}
+          {authLoading ? 'Loading...' : 'Sign In'}
         </button>
         <button
           onClick={handleSignUp}
           className="w-full p-2 bg-green-500 text-white rounded"
-          disabled={loading}
+          disabled={authLoading}
         >
-          {loading ? 'Loading...' : 'Sign Up'}
+          {authLoading ? 'Loading...' : 'Sign Up'}
         </button>
       </div>
     </div>

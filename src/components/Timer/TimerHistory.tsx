@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabase/supabase';
-import { useAuth } from '../../contexts';
+import { useAuth } from '../../contexts/useAuth';
+import { useTimer } from '../../contexts/useTimer';
 
 type TimerSession = {
   id: string;
@@ -17,6 +18,7 @@ export default function TimerHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
+  const { loadSessionSettings } = useTimer();
 
   useEffect(() => {
     if (!user) {
@@ -56,7 +58,8 @@ export default function TimerHistory() {
     } finally {
       setLoading(false);
     }
-  };
+  }
+
 
   const formatDuration = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
@@ -84,6 +87,45 @@ export default function TimerHistory() {
       </div>
     );
   }
+
+    const setSession = async (id: string) => {
+      try {
+        const session = sessions.find(s => s.id === id);
+        console.log('Session Title:', session?.title);
+        console.log('Session ID selected:', id);
+        if (session) {
+          loadSessionSettings(session);
+          setError(null);
+        }
+      } catch (error) {
+        console.error('Error setting timer session:', error instanceof Error ? error.message : 'Unknown error');
+        setError(error instanceof Error ? error.message : 'An error occurred while setting the timer session');
+      }
+    };
+
+  const handleDeleteSession = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this timer session?')) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from('timer_sessions')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user?.id);
+        
+      if (error) throw error;
+      
+      setSessions(sessions.filter(session => session.id !== id));
+    } catch (error) {
+      console.error('Error deleting timer session:', error instanceof Error ? error.message : 'Unknown error');
+      setError(error instanceof Error ? error.message : 'An error occurred while deleting the timer session');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="mt-8">
@@ -125,11 +167,19 @@ export default function TimerHistory() {
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
                 </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Delete
+                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {sessions.map((session) => (
-                <tr key={session.id}>
+            <tr 
+                key={session.id} 
+                onClick={() => setSession(session.id)} 
+                className="hover:bg-gray-100 cursor-pointer transition-colors"
+                title="Click to load this session settings"
+              >
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {session.title}
                   </td>
@@ -146,6 +196,17 @@ export default function TimerHistory() {
                       {session.completed ? 'Completed' : 'Incomplete'}
                     </span>
                   </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteSession(session.id);
+                      }}
+                      className="text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -155,3 +216,4 @@ export default function TimerHistory() {
     </div>
   );
 }
+

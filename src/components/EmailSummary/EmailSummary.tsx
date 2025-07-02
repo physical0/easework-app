@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../../supabase/supabase';
-import { useAuth } from '../../contexts';
+import { useAuth } from '../../contexts/useAuth';
 
 export default function EmailSummary() {
   const { user } = useAuth();

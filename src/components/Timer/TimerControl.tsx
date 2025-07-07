@@ -68,6 +68,8 @@ export default function TimerControl() {
     
     setIsActive(true);
     startTimeRef.current = Date.now();
+
+    console.log('Timer mode:', mode);
     
     // Record session start in database
     if (mode === 'pomodoro') {
@@ -123,25 +125,16 @@ export default function TimerControl() {
 
   const stopTimer = async () => {
     pauseTimer();
-    
-    // If we're stopping a pomodoro session, update the database
-    if (mode === 'pomodoro' && sessionIdRef.current && user) {
-      try {
-        const { error } = await supabase
-          .from('timer_sessions')
-          .update({
-            completed: false,
-          })
-          .eq('id', sessionIdRef.current);
-          if (error) {
-            throw error;
-          }
-      } catch (error) {
-        console.error('Error updating timer session:', error);
-      }
-    }
-    
-    // Reset timer using context settings
+
+    sessionIdRef.current = null;
+    startTimeRef.current = null;
+    setCurrentSession(null);
+  };
+
+  const resetTimer = () => {
+    pauseTimer();
+
+    // Reset timer
     switch (mode) {
       case 'pomodoro':
         setTimeLeft(settings.pomodoro * 60);
@@ -153,14 +146,11 @@ export default function TimerControl() {
         setTimeLeft(settings.longBreak * 60);
         break;
     }
-    
+
     sessionIdRef.current = null;
     startTimeRef.current = null;
     setCurrentSession(null);
-  };
 
-  const resetTimer = () => {
-    stopTimer();
   };
 
   const handleTimerComplete = async () => {
@@ -168,6 +158,7 @@ export default function TimerControl() {
 
       if (mode === 'pomodoro') {
         if (sessionIdRef.current) {
+          // Complete the pomodoro session in the database
           console.log('Completing timer for session ID:', sessionIdRef.current);
 
           const { data, error } = await supabase
@@ -196,21 +187,17 @@ export default function TimerControl() {
         const nextMode = pomodorosCompleted % 4 === 3 ? 'longBreak' : 'shortBreak';
         setMode(nextMode);
 
-        if (settings.autoStartBreaks) {
-          setTimeout(() => { startTimer(); }, 500);
-        }
       } else {
         // Break completed, clear any session data and go back to pomodoro
         sessionIdRef.current = null;
         startTimeRef.current = null;
         setCurrentSession(null);
         setMode('pomodoro');
-
-        if (settings.autoStartPomodoros) {
-          setTimeout(() => { startTimer(); }, 500);
-        }
       }
   };
+
+
+
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -351,30 +338,6 @@ export default function TimerControl() {
                   onChange={(e) => updateSetting('longBreak', parseInt(e.target.value) || 15)}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
-              </div>
-              <div className="flex items-center">
-                <input
-                  id="autoStartBreaks"
-                  type="checkbox"
-                  checked={settings.autoStartBreaks}
-                  onChange={(e) => updateSetting('autoStartBreaks', e.target.checked)}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <label htmlFor="autoStartBreaks" className="ml-2 block text-sm text-gray-700">
-                  Auto-start breaks
-                </label>
-              </div>
-              <div className="flex items-center">
-                <input
-                  id="autoStartPomodoros"
-                  type="checkbox"
-                  checked={settings.autoStartPomodoros}
-                  onChange={(e) => updateSetting('autoStartPomodoros', e.target.checked)}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <label htmlFor="autoStartPomodoros" className="ml-2 block text-sm text-gray-700">
-                  Auto-start pomodoros
-                </label>
               </div>
             </div>
           </div>

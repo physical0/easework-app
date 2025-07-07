@@ -1,18 +1,36 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { TimerSettings, TimerSession } from '../contexts/useTimer';
 import { TimerContext } from './TimerContextDef';
 
+const STORAGE_KEY = 'easework-timer-settings';
+
 export function TimerProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<TimerSettings>({
-    pomodoro: 25,
-    shortBreak: 5,
-    longBreak: 15,
-    autoStartBreaks: true,
-    autoStartPomodoros: true,
+  const [settings, setSettings] = useState<TimerSettings>(() => {
+
+    const savedSettings = localStorage.getItem(STORAGE_KEY);
+    if (savedSettings) {
+      try {
+        return JSON.parse(savedSettings);
+      } catch (e) {
+        console.error('Failed to parse saved settings:', e);
+      }
+    }
+
+    return {
+      pomodoro: 25,
+      shortBreak: 5,
+      longBreak: 15,
+      autoStartBreaks: true,
+      autoStartPomodoros: true,
+    };
   });
 
   const [currentSession, setCurrentSession] = useState<TimerSession | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  }, [settings]);
 
   const updateSettings = (newSettings: Partial<TimerSettings>) => {
     setSettings(prev => ({ ...prev, ...newSettings }));

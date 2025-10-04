@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '../../supabase/supabase';
 import { useAuth } from '../../contexts/useAuth';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default function EmailSummary() {
   const { user } = useAuth();
@@ -8,6 +9,7 @@ export default function EmailSummary() {
   const [summary, setSummary] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [errorDebug, setErrorDebug] = useState("");
   const [savedSummaries, setSavedSummaries] = useState<Array<{ id: string; original: string; summary: string; created_at: string }>>([]);
   const [showSaved, setShowSaved] = useState(false);
 
@@ -25,10 +27,11 @@ export default function EmailSummary() {
       // This is a placeholder for the actual AI summarization API call
       // In a real application, you would call an external AI service
       // For now, we'll simulate a summary with a simple algorithm
-      const simulatedSummary = simulateAISummary(emailContent);
+      const simulatedSummary = await simulateAISummary(emailContent);
       
       // Set the summary
       setSummary(simulatedSummary);
+      setErrorDebug(simulatedSummary);
 
       // If user is logged in, save the summary to Supabase
       if (user) {
@@ -120,20 +123,32 @@ export default function EmailSummary() {
 
   // Simple function to simulate AI summarization
   // In a real application, this would be replaced with an actual AI service call
-  const simulateAISummary = (text: string): string => {
+  const simulateAISummary = async (text: string): Promise<string> => {
     // Split the text into sentences
-    const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
-    
+    const sentences: string[] = text.match(/[^.!?]+[.!?]+/g) || [];
+
     // If the text is short, return it as is
     if (sentences.length <= 3) return text;
-    
-    // Otherwise, take the first sentence (often contains the main point)
-    // and a couple of sentences from the middle or end
-    const firstSentence = sentences[0];
-    const middleSentence = sentences[Math.floor(sentences.length / 2)];
-    const lastSentence = sentences[sentences.length - 1];
-    
-    return `${firstSentence} ${middleSentence} ${lastSentence}`;
+
+    const genAI = new GoogleGenerativeAI(import.meta.env.API_KEY);
+
+    const metaText: string= "You are a helpful assistant that summarizes emails. Please summarize the following email content professionally in as few sentences and paragraphs as possible. ";
+
+    const longerText = metaText.concat(text);
+
+    const model = genAI.getGenerativeModel({model:"gemini-2.5-flash-preview-05-20"});
+
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{text: longerText}]
+        }
+      ]
+
+    })
+
+    return result.response.text();
   };
 
   return (
@@ -176,6 +191,7 @@ export default function EmailSummary() {
 
       {summary && (
         <div className="mb-6">
+          <div className="text-sm text-gray-500 mb-1">Summary Debug: {errorDebug}</div>
           <h3 className="text-lg font-medium text-gray-900 mb-2">Summary</h3>
           <div className="bg-gray-50 p-4 rounded-md">{summary}</div>
         </div>

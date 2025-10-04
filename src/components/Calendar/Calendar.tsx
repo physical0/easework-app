@@ -152,7 +152,9 @@ export default function Calendar() {
     if (!user || !selectedDay) return;
 
     try {
-      const { data, error } = await supabase.from('calendar_events').insert([
+      const { data, error } = await supabase
+      .from('calendar_events')
+      .insert([
         {
           title: newEvent.title,
           description: newEvent.description,
@@ -160,13 +162,17 @@ export default function Calendar() {
           end_time: newEvent.end_time,
           user_id: user.id,
         },
-      ]).select();
+      ])
+      .select()
+      .single();
+
+      console.log('New event created:', data);
 
       if (error) throw error;
 
       // Add the new event to the events state
-      if (data && data.length > 0) {
-        setEvents([...events, data[0]]);
+      if (data) {
+        setEvents([...events, data]);
       }
 
       // Reset form and close modal

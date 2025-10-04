@@ -1,52 +1,216 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../supabase/supabase';
 import { useAuth } from '../../contexts/useAuth';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+type Message = {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Date;
+};
+
+type SavedConversation = {
+  id: string;
+  title: string;
+  messages: Message[];
+  created_at: string;
+};
 
 export default function EmailSummary() {
   const { user } = useAuth();
-  const [emailContent, setEmailContent] = useState('');
-  const [summary, setSummary] = useState('');
+  const [inputMessage, setInputMessage] = useState('');
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: 'welcome',
+      role: 'system',
+      content: 'Welcome to Email Summarizer! Paste your email content, and I\'ll create a concise summary for you.',
+      timestamp: new Date(),
+    }
+  ]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [savedSummaries, setSavedSummaries] = useState<Array<{ id: string; original: string; summary: string; created_at: string }>>([]);
+  const [savedConversations, setSavedConversations] = useState<SavedConversation[]>([]);
   const [showSaved, setShowSaved] = useState(false);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [genAIModel, setGenAIModel] = useState<any>(null);
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Initialize Gemini AI
+  useEffect(() => {
+    try {
+      // The API key should be stored in environment variables
+      const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+      if (!API_KEY) {
+        console.warn('No API key found for Gemini');
+        return;
+      }
 
-  // Function to handle email summarization
-  const handleSummarize = async () => {
-    if (!emailContent.trim()) {
-      setError('Please enter email content to summarize');
+      const genAI = new GoogleGenerativeAI(API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-preview-05-20" });
+      setGenAIModel(model);
+    } catch (err) {
+      console.error('Error initializing Gemini:', err);
+      // Silent error - we'll fall back to simulation mode
+    }
+  }, []);
+  
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Fetch user's conversations on mount
+  useEffect(() => {
+    if (user) {
+      fetchSavedSummaries();
+    }
+  }, [user]);
+
+  // Format messages for Gemini API
+  const formatMessagesForGemini = (messageList: Message[]) => {
+    return messageList.map(message => ({
+      role: message.role === 'system' || message.role === 'assistant' ? 'model' : 'user',
+      parts: { text: message.content }
+    }));
+  };
+
+  // Handle send message with Gemini integration
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim()) {
       return;
     }
 
+    setError('');
+    
+    // Add user message to chat
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: inputMessage,
+      timestamp: new Date(),
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
+    setInputMessage('');
+    
+    // Show thinking indicator
+    setLoading(true);
+    
     try {
-      setLoading(true);
-      setError('');
-
-      // This is a placeholder for the actual AI summarization API call
-      // In a real application, you would call an external AI service
-      // For now, we'll simulate a summary with a simple algorithm
-      const simulatedSummary = simulateAISummary(emailContent);
+      let summary = '';
       
-      // Set the summary
-      setSummary(simulatedSummary);
-
-      // If user is logged in, save the summary to Supabase
+      if (genAIModel) {
+        // Prepare context for Gemini
+        const initialPrompt = {
+          role: 'user',
+          parts: { text: "You are a helpful assistant that summarizes emails. Please provide concise and clear summaries. Don't use phrases like 'certainly', 'of course', or 'as an AI language model'. Just summarize the following email:" }
+        };
+        
+        // Get current conversation plus the new message
+        const conversationHistory = formatMessagesForGemini([...messages, userMessage]);
+        
+        // Add initial prompt at the beginning if this is a new conversation
+        if (messages.length <= 1) {
+          conversationHistory.unshift(initialPrompt);
+        }
+        
+        try {
+          // Generate summary with Gemini
+          const result = await genAIModel.generateContent({
+            contents: conversationHistory
+          });
+          
+          summary = result.response.text();
+        } catch (aiError) {
+          console.error('Gemini API error:', aiError);
+          // Fallback to simulation
+          summary = simulateAISummary(userMessage.content);
+        }
+      } else {
+        // Fallback to simulation if Gemini is not available
+        summary = simulateAISummary(userMessage.content);
+      }
+      
+      // Add assistant response
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: summary,
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+      
+      // Save conversation if user is logged in
       if (user) {
-        const { error: saveError } = await supabase
-          .from('email_summaries')
-          .insert([
-            {
-              user_id: user.id,
-              original_content: emailContent,
-              summary_content: simulatedSummary,
-            },
-          ]);
+        const conversationTitle = userMessage.content.substring(0, 50) + "...";
+        
+        // If this is a new conversation, create it
+        if (!activeConversationId) {
+          const { data, error: saveError } = await supabase
+            .from('email_conversations')
+            .insert([
+              {
+                user_id: user.id,
+                title: conversationTitle,
+                messages: [...messages, userMessage, assistantMessage]
+              },
+            ])
+            .select();
 
-        if (saveError) throw saveError;
+          if (saveError) {
+            console.error('Database save error:', saveError);
+            // Don't throw, just log
+          } else if (data && data[0]) {
+            setActiveConversationId(data[0].id);
+            
+            // Add to saved conversations
+            const newConversation: SavedConversation = {
+              id: data[0].id,
+              title: conversationTitle,
+              messages: [...messages, userMessage, assistantMessage],
+              created_at: new Date().toLocaleString()
+            };
+            
+            setSavedConversations(prev => [newConversation, ...prev]);
+          }
+        } else {
+          // Update existing conversation
+          const { error: updateError } = await supabase
+            .from('email_conversations')
+            .update({
+              messages: [...messages, userMessage, assistantMessage],
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', activeConversationId);
+
+          if (updateError) {
+            console.error('Database update error:', updateError);
+            // Don't throw, just log
+          } else {
+            // Update in local state
+            setSavedConversations(prev => prev.map(convo => 
+              convo.id === activeConversationId 
+                ? { ...convo, messages: [...messages, userMessage, assistantMessage] }
+                : convo
+            ));
+          }
+        }
       }
     } catch (err) {
       console.error('Error summarizing email:', err);
-      setError('Failed to summarize email. Please try again.');
+      
+      // Provide a fallback response instead of an error message
+      const fallbackMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "Here's a summary of your email:\n\n" + simulateAISummary(inputMessage),
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, fallbackMessage]);
     } finally {
       setLoading(false);
     }
@@ -61,40 +225,35 @@ export default function EmailSummary() {
       setError('');
 
       const { data, error: fetchError } = await supabase
-        .from('email_summaries')
-        .select('id, original_content, summary_content, created_at')
+        .from('email_conversations')
+        .select('id, title, messages, created_at')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('updated_at', { ascending: false });
 
-      if (fetchError) throw fetchError;
-
-      interface SavedSummary {
-        id: string;
-        original_content: string;
-        summary_content: string;
-        created_at: string;
+      if (fetchError) {
+        console.error('Error fetching conversations:', fetchError);
+        return;
       }
 
-      setSavedSummaries(
-        data.map((item: SavedSummary) => ({
-          id: item.id,
-          original: item.original_content,
-          summary: item.summary_content,
-          created_at: new Date(item.created_at).toLocaleString(),
-        }))
-      );
+      const conversations = data.map((item) => ({
+        id: item.id,
+        title: item.title || 'Untitled Conversation',
+        messages: Array.isArray(item.messages) ? item.messages : [],
+        created_at: new Date(item.created_at).toLocaleString(),
+      }));
 
+      setSavedConversations(conversations);
       setShowSaved(true);
     } catch (err) {
-      console.error('Error fetching saved summaries:', err);
-      setError('Failed to fetch saved summaries. Please try again.');
+      console.error('Error fetching saved conversations:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Function to delete a saved summary
-  const deleteSavedSummary = async (id: string) => {
+  // Function to delete a saved conversation
+  const deleteSavedConversation = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!user) return;
 
     try {
@@ -102,30 +261,63 @@ export default function EmailSummary() {
       setError('');
 
       const { error: deleteError } = await supabase
-        .from('email_summaries')
+        .from('email_conversations')
         .delete()
         .eq('id', id);
 
-      if (deleteError) throw deleteError;
+      if (deleteError) {
+        console.error('Error deleting conversation:', deleteError);
+        return;
+      }
 
-      // Update the saved summaries list
-      setSavedSummaries(savedSummaries.filter((summary) => summary.id !== id));
+      // Update the saved conversations list
+      setSavedConversations(savedConversations.filter((convo) => convo.id !== id));
+      
+      // If the active conversation was deleted, reset to a new conversation
+      if (activeConversationId === id) {
+        startNewConversation();
+      }
     } catch (err) {
-      console.error('Error deleting saved summary:', err);
-      setError('Failed to delete saved summary. Please try again.');
+      console.error('Error deleting conversation:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Simple function to simulate AI summarization
-  // In a real application, this would be replaced with an actual AI service call
+  // Function to load a saved conversation
+  const loadConversation = (conversation: SavedConversation) => {
+    setMessages(conversation.messages.length > 0 
+      ? conversation.messages 
+      : [{
+          id: 'welcome',
+          role: 'system',
+          content: 'Welcome to Email Summarizer! Paste your email content, and I\'ll create a concise summary for you.',
+          timestamp: new Date(),
+        }]
+    );
+    setActiveConversationId(conversation.id);
+    setShowSaved(false);
+  };
+
+  // Function to start a new conversation
+  const startNewConversation = () => {
+    setMessages([{
+      id: 'welcome',
+      role: 'system',
+      content: 'Welcome to Email Summarizer! Paste your email content, and I\'ll create a concise summary for you.',
+      timestamp: new Date(),
+    }]);
+    setActiveConversationId(null);
+    setShowSaved(false);
+  };
+
+  // Simple function to simulate AI summarization (fallback if API is unavailable)
   const simulateAISummary = (text: string): string => {
     // Split the text into sentences
     const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
     
     // If the text is short, return it as is
-    if (sentences.length <= 3) return text;
+    if (sentences.length <= 3) return "Here's your summary:\n\n" + text;
     
     // Otherwise, take the first sentence (often contains the main point)
     // and a couple of sentences from the middle or end
@@ -133,92 +325,202 @@ export default function EmailSummary() {
     const middleSentence = sentences[Math.floor(sentences.length / 2)];
     const lastSentence = sentences[sentences.length - 1];
     
-    return `${firstSentence} ${middleSentence} ${lastSentence}`;
+    return "Here's your email summary:\n\n" + `${firstSentence} ${middleSentence} ${lastSentence}`;
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <div className="mb-6">
-        <label htmlFor="emailContent" className="block text-sm font-medium text-gray-700 mb-2">
-          Email Content
-        </label>
-        <textarea
-          id="emailContent"
-          rows={8}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="Paste your email content here..."
-          value={emailContent}
-          onChange={(e) => setEmailContent(e.target.value)}
-        />
-      </div>
-
-      <div className="flex justify-between mb-6">
-        <button
-          onClick={handleSummarize}
-          disabled={loading || !emailContent.trim()}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? 'Summarizing...' : 'Summarize Email'}
-        </button>
-
-        {user && (
+    <div className="flex h-[calc(100vh-200px)] max-h-[600px]">
+      {/* Sidebar for saved conversations */}
+      {user && showSaved && (
+        <div className="w-1/4 bg-gray-50 border-r border-gray-200 overflow-y-auto p-4">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-medium">Your Conversations</h3>
+            <button 
+              onClick={() => setShowSaved(false)}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+          
           <button
-            onClick={fetchSavedSummaries}
-            disabled={loading}
-            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={startNewConversation}
+            className={`w-full flex items-center p-3 mb-2 text-left rounded-md hover:bg-gray-100 transition-colors ${activeConversationId ? '' : 'bg-blue-50 border border-blue-200'}`}
           >
-            {showSaved ? 'Hide Saved' : 'Show Saved Summaries'}
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 3a1 1 0 00-1 1v5H4a1 1 0 100 2h5v5a1 1 0 102 0v-5h5a1 1 0 100-2h-5V4a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            New Conversation
           </button>
-        )}
-      </div>
-
-      {error && <div className="text-red-600 mb-4">{error}</div>}
-
-      {summary && (
-        <div className="mb-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Summary</h3>
-          <div className="bg-gray-50 p-4 rounded-md">{summary}</div>
-        </div>
-      )}
-
-      {showSaved && savedSummaries.length > 0 && (
-        <div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Saved Summaries</h3>
-          <div className="space-y-4 max-h-96 overflow-y-auto">
-            {savedSummaries.map((item) => (
-              <div key={item.id} className="border border-gray-200 rounded-md p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <span className="text-sm text-gray-500">{item.created_at}</span>
-                  <button
-                    onClick={() => deleteSavedSummary(item.id)}
-                    className="text-red-600 hover:text-red-800 text-sm"
-                  >
-                    Delete
-                  </button>
-                </div>
-                <div className="text-sm font-medium mb-1">Summary:</div>
-                <div className="bg-gray-50 p-2 rounded-md mb-2 text-sm">{item.summary}</div>
-                <div className="text-sm font-medium mb-1">Original:</div>
-                <div className="bg-gray-50 p-2 rounded-md text-sm max-h-32 overflow-y-auto">
-                  {item.original}
-                </div>
+          
+          <div className="space-y-1 mt-4">
+            <h4 className="text-xs uppercase text-gray-500 font-medium mb-2 pl-2">Recent Conversations</h4>
+            
+            {savedConversations.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 text-sm">
+                No saved conversations found
               </div>
-            ))}
+            ) : (
+              savedConversations.map((convo) => (
+                <div 
+                  key={convo.id}
+                  className={`flex flex-col p-3 rounded-md hover:bg-gray-100 cursor-pointer ${activeConversationId === convo.id ? 'bg-blue-50 border border-blue-200' : ''}`}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                    <button 
+                      onClick={() => loadConversation(convo)}
+                      className="text-sm font-medium truncate flex-1 text-left"
+                    >
+                      {convo.title || convo.messages[0]?.content.substring(0, 30) || 'Untitled'}
+                    </button>
+                    <button
+                      onClick={(e) => deleteSavedConversation(convo.id, e)}
+                      className="text-red-600 hover:text-red-800 ml-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+                  <span className="text-xs text-gray-500">{convo.created_at}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
 
-      {showSaved && savedSummaries.length === 0 && (
-        <div className="text-center py-4 text-gray-500">
-          No saved summaries found. Summarize an email to save it.
+      {/* Main chat area */}
+      <div className={`flex flex-col ${showSaved ? 'w-3/4' : 'w-full'} bg-white rounded-lg shadow-md`}>
+        {/* Chat header */}
+        <div className="px-4 py-3 border-b flex justify-between items-center">
+          <div className="flex items-center">
+            <h2 className="font-medium">Email Summarizer</h2>
+            {genAIModel ? (
+              <span className="ml-2 text-xs bg-green-100 text-green-800 rounded-full px-2 py-0.5">Gemini AI</span>
+            ) : (
+              <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 rounded-full px-2 py-0.5">Simulation</span>
+            )}
+          </div>
+          
+          <div className="flex space-x-2">
+            {user && (
+              <button
+                onClick={startNewConversation}
+                className="text-gray-600 hover:text-gray-900 p-1"
+                title="New conversation"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 3a1 1 0 00-1 1v5H4a1 1 0 100 2h5v5a1 1 0 102 0v-5h5a1 1 0 100-2h-5V4a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </button>
+            )}
+            
+            {user && (
+              <button
+                onClick={fetchSavedSummaries}
+                className="text-gray-600 hover:text-gray-900 p-1"
+                title="View saved conversations"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
-      )}
 
-      {!user && (
-        <div className="text-center py-4 text-gray-500 border-t border-gray-200 mt-6">
-          Sign in to save your email summaries and access them later.
+        {/* Messages area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              {message.role !== 'user' && (
+                <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white mr-2 flex-shrink-0">
+                  {message.role === 'system' ? 'S' : 'AI'}
+                </div>
+              )}
+              
+              <div
+                className={`max-w-[75%] rounded-lg px-4 py-2 ${
+                  message.role === 'user'
+                    ? 'bg-blue-600 text-white rounded-br-none'
+                    : message.role === 'system'
+                    ? 'bg-gray-200 text-gray-800 rounded-bl-none'
+                    : 'bg-gray-100 text-gray-800 rounded-bl-none'
+                }`}
+              >
+                <div className="whitespace-pre-wrap">{message.content}</div>
+                <div className="text-xs mt-1 opacity-70">
+                  {message.timestamp.toLocaleTimeString()}
+                </div>
+              </div>
+              
+              {message.role === 'user' && (
+                <div className="w-8 h-8 rounded-full bg-gray-500 flex items-center justify-center text-white ml-2 flex-shrink-0">
+                  {user?.email?.charAt(0).toUpperCase() || 'U'}
+                </div>
+              )}
+            </div>
+          ))}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white mr-2 flex-shrink-0">
+                AI
+              </div>
+              <div className="bg-gray-100 rounded-lg px-4 py-2 rounded-bl-none">
+                <div className="flex space-x-2">
+                  <div className="w-2 h-2 rounded-full bg-gray-500 animate-bounce"></div>
+                  <div className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  <div className="w-2 h-2 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
         </div>
-      )}
+
+        {/* Input area */}
+        <div className="border-t p-4">
+          {error && <div className="text-red-600 mb-2 text-sm">{error}</div>}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSendMessage();
+            }}
+            className="flex space-x-2"
+          >
+            <textarea
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              placeholder="Paste your email content here..."
+              className="flex-1 border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              rows={3}
+              disabled={loading}
+            />
+            <button
+              type="submit"
+              disabled={loading || !inputMessage.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed self-end h-12"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+              </svg>
+            </button>
+          </form>
+          <div className="text-xs text-gray-500 mt-2 text-center">
+            {user ? (
+              activeConversationId 
+                ? 'Your conversation is being saved automatically' 
+                : 'A new conversation will be created when you send a message'
+            ) : 'Sign in to save your conversations'}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

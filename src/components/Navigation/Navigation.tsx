@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '../../contexts';
+import { useAuth } from '../../contexts/useAuth';
 
 export default function Navigation() {
   const { user, signOut } = useAuth();

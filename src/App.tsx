@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './App.css';
-import { AuthProvider } from './contexts';
+import { AuthProvider } from './contexts/AuthContext';
+import { TimerProvider } from './contexts/TimerContext';
 import Layout from './components/Layout/Layout';
 
 // Pages
@@ -16,11 +17,12 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/tasks" element={<TodoPage />} />
-            <Route path="/timer" element={<TimerPage />} />
+        <TimerProvider>
+          <Layout>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/tasks" element={<TodoPage />} />
+              <Route path="/timer" element={<TimerPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/email-summary" element={<EmailSummaryPage />} />
             <Route path="/sleep-tracker" element={<SleepTrackerPage />} />
@@ -28,6 +30,7 @@ function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>
+        </TimerProvider>
       </AuthProvider>
     </Router>
   );

@@ -103,26 +103,56 @@ export default function EmailSummary() {
       
       if (genAIModel) {
         // Prepare context for Gemini
-        const initialPrompt = {
+        const deciderPrompt = {
           role: 'user',
-          parts: { text: "You are a helpful assistant that summarizes emails. Please provide concise and clear summaries. Don't use phrases like 'certainly', 'of course', or 'as an AI language model'. Just summarize the following email:" }
+          parts: { text: "You are a helpful assistant that summarizes emails. Please determine if the message is an email or not and give the certainty probability from 0 to 1 based on how likely it is to be an email. Just answer this request with only the floating point (like simply answering 'Yes' or 'No' but with a float such as '0.85')." }
         };
         
         // Get current conversation plus the new message
         const conversationHistory = formatMessagesForGemini([...messages, userMessage]);
         
-        // Add initial prompt at the beginning if this is a new conversation
-        if (messages.length <= 1) {
-          conversationHistory.unshift(initialPrompt);
-        }
+        conversationHistory.unshift(deciderPrompt);
         
-        try {
+       try {
           // Generate summary with Gemini
           const result = await genAIModel.generateContent({
             contents: conversationHistory
           });
           
-          summary = result.response.text();
+          // Get the text response and attempt to parse it as a number
+          const responseText = result.response.text();
+          console.log("Gemini probability response:", responseText);
+          
+          // Extract a number from the response text - handles cases where Gemini adds extra text
+          const probabilityMatch = responseText.match(/(\d+\.\d+|\d+)/);
+          const probability = probabilityMatch ? parseFloat(probabilityMatch[0]) : 0;
+          
+          if (probability > 0.5) {
+            const additionalPrompt = {
+              role: 'user',
+              parts: { text: "Please provide concise and clear summaries. Don't use phrases like 'certainly', 'of course', or 'as an AI language model'. Just summarize the following email (don't answer with numbers anymore, please summarize properly): " + userMessage.content }
+            };
+
+            // Make a completely new request with only the summary prompt
+            const summaryResult = await genAIModel.generateContent({
+              contents: [additionalPrompt]
+            });
+
+            summary = summaryResult.response.text();
+          } 
+          else {
+            const additionalPrompt = {
+              role: 'user',
+              parts: { text: "The provided text does not appear to be an email. However, please provide a brief summary or key points of the following text (don't answer with numbers anymore, please summarize properly): " + userMessage.content }
+            };
+
+            // Make a completely new request with only the summary prompt
+            const summaryResult = await genAIModel.generateContent({
+              contents: [additionalPrompt]
+            });
+
+            summary = summaryResult.response.text();
+          }
         } catch (aiError) {
           console.error('Gemini API error:', aiError);
           // Fallback to simulation

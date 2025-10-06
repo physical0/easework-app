@@ -97,6 +97,8 @@ export default function EmailSummary() {
     
     // Show thinking indicator
     setLoading(true);
+
+    let probability: number = 0;
     
     try {
       let summary = '';
@@ -125,7 +127,7 @@ export default function EmailSummary() {
           
           // Extract a number from the response text - handles cases where Gemini adds extra text
           const probabilityMatch = responseText.match(/(\d+\.\d+|\d+)/);
-          const probability = probabilityMatch ? parseFloat(probabilityMatch[0]) : 0;
+          probability = probabilityMatch ? parseFloat(probabilityMatch[0]) : 0;
           
           if (probability > 0.5) {
             const additionalPrompt = {
@@ -185,6 +187,7 @@ export default function EmailSummary() {
               {
                 user_id: user.id,
                 title: conversationTitle,
+                category: probability > 0.5 ? 'email' : 'other',
                 messages: [...messages, userMessage, assistantMessage]
               },
             ])
@@ -246,7 +249,6 @@ export default function EmailSummary() {
     }
   };
 
-  // Function to fetch saved summaries
   const fetchSavedSummaries = async () => {
     if (!user) return;
 
@@ -265,13 +267,23 @@ export default function EmailSummary() {
         return;
       }
 
-      const conversations = data.map((item) => ({
-        id: item.id,
-        title: item.title || 'Untitled Conversation',
-        messages: Array.isArray(item.messages) ? item.messages : [],
-        created_at: new Date(item.created_at).toLocaleString(),
-      }));
+      // Fix the timestamp conversion issue
+      const conversations = data.map((item) => {
+        // Process messages to convert timestamp strings back to Date objects
+        const processedMessages = item.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+        
+        return {
+          id: item.id,
+          title: item.title || 'Untitled Conversation',
+          messages: processedMessages,
+          created_at: new Date(item.created_at).toLocaleString(),
+        };
+      });
 
+      console.log('Fetched conversations:', conversations);
       setSavedConversations(conversations);
       setShowSaved(true);
     } catch (err) {
